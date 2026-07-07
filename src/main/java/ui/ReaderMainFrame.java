@@ -1,0 +1,60 @@
+package ui;
+
+import model.User;
+
+import javax.swing.*;
+import java.awt.*;
+
+public class ReaderMainFrame extends JFrame {
+
+    private final User reader;
+
+    public ReaderMainFrame(User reader) {
+        this.reader = reader;
+
+        setTitle("图书管理系统 - 读者:" + reader.getUsername());
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setSize(500, 400);
+        setLocationRelativeTo(null);
+
+        JPanel panel = new JPanel(new GridBagLayout());
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(10, 20, 10, 20);
+
+        JLabel titleLabel = new JLabel("读者服务面板");
+        titleLabel.setFont(new Font("微软雅黑", Font.BOLD, 20));
+        gbc.gridx = 0; gbc.gridy = 0; gbc.gridwidth = 2;
+        panel.add(titleLabel, gbc);
+
+        gbc.gridwidth = 1;
+        gbc.gridy = 1; gbc.gridx = 0;
+
+        JButton borrowBtn = new JButton("借阅图书");
+        styleButton(borrowBtn);
+        panel.add(borrowBtn, gbc);
+
+        gbc.gridx = 1;
+        JButton myBorrowBtn = new JButton("我的借阅");
+        styleButton(myBorrowBtn);
+        panel.add(myBorrowBtn, gbc);
+
+        gbc.gridy = 2; gbc.gridx = 0; gbc.gridwidth = 2;
+        JButton logoutBtn = new JButton("退出登录");
+        styleButton(logoutBtn);
+        panel.add(logoutBtn, gbc);
+
+        borrowBtn.addActionListener(e -> new BookBrowseDialog(this, reader).setVisible(true));
+        myBorrowBtn.addActionListener(e -> new MyBorrowDialog(this, reader).setVisible(true));
+        logoutBtn.addActionListener(e -> {
+            dispose();
+            new LoginFrame().setVisible(true);
+        });
+
+        setContentPane(panel);
+    }
+
+    private void styleButton(JButton btn) {
+        btn.setPreferredSize(new Dimension(160, 60));
+        btn.setFont(new Font("微软雅黑", Font.PLAIN, 16));
+    }
+}
