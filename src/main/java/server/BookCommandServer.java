@@ -1,151 +1,102 @@
 package server;
 
 import javax.swing.*;
-import java.io.IOException;
+import java.io.*;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.nio.charset.StandardCharsets;
 import java.util.function.Consumer;
 
 /**
- * TCP 命令服务器
- * 绑定到 localhost，通过回调通知 UI 启动结果，避免"假运行"状态
+ * TCP 命令服务器 — 单线程阻塞模式
+ * 一次仅处理一个客户端连接，逻辑直接内联，无线程池/并发控制。
  */
 public class BookCommandServer {
 
     private final int port;
-    private final String bindAddr;
     private ServerSocket serverSocket;
-    private ExecutorService threadPool;
-    private final AtomicBoolean running = new AtomicBoolean(false);
-    private final AtomicInteger clientCount = new AtomicInteger(0);
+    private volatile boolean running;
     private JTextArea logArea;
 
-    /** 启动结果回调: success=true 表示端口绑定成功 */
-    private Consumer<Boolean> onStartResult;
-
-    public BookCommandServer(int port) {
-        this(port, "127.0.0.1");
-    }
-
-    public BookCommandServer(int port, String bindAddr) {
-        this.port = port;
-        this.bindAddr = bindAddr;
-    }
-
-    public BookCommandServer() {
-        this(8888);
-    }
+    public BookCommandServer(int port) { this.port = port; }
+    public BookCommandServer() { this(8888); }
 
     /**
-     * 启动服务器
-     * @param logArea   日志输出区域
-     * @param onStartResult 启动结果回调: true=绑定成功, false=绑定失败
+     * 启动服务器（后台线程中执行 accept 循环）
      */
-    public void start(JTextArea logArea, Consumer<Boolean> onStartResult) {
-        if (running.get()) {
-            appendLog("[警告] 服务器已在运行中");
-            return;
-        }
+    public void start(JTextArea logArea, Consumer<Boolean> onResult) {
+        if (running) { log("服务器已在运行中"); return; }
         this.logArea = logArea;
-        this.onStartResult = onStartResult;
-        threadPool = Executors.newCachedThreadPool(r -> {
-            Thread t = new Thread(r, "ClientHandler");
-            t.setDaemon(true);
-            return t;
-        });
 
-        Thread listenThread = new Thread(() -> {
+        Thread t = new Thread(() -> {
             try {
                 serverSocket = new ServerSocket();
                 serverSocket.setReuseAddress(true);
-                serverSocket.bind(new InetSocketAddress(bindAddr, port), 50);  // 同步绑定
+                serverSocket.bind(new InetSocketAddress("127.0.0.1", port));
+                running = true;
+                SwingUtilities.invokeLater(() -> onResult.accept(true));
 
-                // 绑定成功后才设置状态
-                running.set(true);
-                notifyStartResult(true);
+                log("========================================");
+                log("服务端绑定成功 — 127.0.0.1:" + port);
+                log("NetAssist 配置: TCP Client → 127.0.0.1:" + port);
+                log("========================================");
 
-                appendLog("========================================");
-                appendLog("[服务端] 绑定成功");
-                appendLog("[服务端] 地址: " + bindAddr + ":" + port);
-                appendLog("[服务端] NetAssist 配置: TCP Client → " + bindAddr + ":" + port);
-                appendLog("[服务端] 等待客户端连接...");
-                appendLog("========================================");
-
-                while (running.get()) {
+                while (running) {
                     try {
                         Socket client = serverSocket.accept();
-                        int current = clientCount.incrementAndGet();
-                        appendLog("[连接] " + client.getInetAddress().getHostAddress()
-                                + ":" + client.getPort() + " (在线: " + current + ")");
-
-                        ClientHandler handler = new ClientHandler(client,
-                                BookCommandServer.this::onClientMessage,
-                                BookCommandServer.this::onClientDisconnect);
-                        threadPool.submit(handler);
+                        String addr = client.getInetAddress().getHostAddress() + ":" + client.getPort();
+                        log("[连接] " + addr);
+                        handleClient(client, addr);
+                        log("[断开] " + addr);
                     } catch (IOException e) {
-                        if (running.get()) {
-                            appendLog("[错误] 接受连接异常: " + e.getMessage());
-                        }
+                        if (running) log("[错误] " + e.getMessage());
                     }
                 }
             } catch (IOException e) {
-                running.set(false);
-                notifyStartResult(false);
-                String msg = e.getMessage();
-                appendLog("[失败] 端口绑定失败: " + msg);
-                appendLog("----------------------------------------");
-                if (msg != null && msg.contains("Address already in use")) {
-                    appendLog("  → 端口 " + port + " 被占用，请换端口或执行:");
-                    appendLog("     netstat -ano | findstr :" + port);
-                } else if (msg != null && msg.contains("Permission denied")) {
-                    appendLog("  → 权限不足，端口需 ≥ 1024，请换端口重试");
-                } else {
-                    appendLog("  → 请更换端口号后重试");
-                }
-                appendLog("----------------------------------------");
+                running = false;
+                SwingUtilities.invokeLater(() -> onResult.accept(false));
+                log("[失败] 端口绑定失败: " + e.getMessage());
             }
-        }, "ServerListener");
-        listenThread.setDaemon(true);
-        listenThread.start();
+        }, "BookServer");
+        t.setDaemon(true);
+        t.start();
     }
 
-    /** 通知 UI 启动结果 */
-    private void notifyStartResult(boolean success) {
-        if (onStartResult != null) {
-            SwingUtilities.invokeLater(() -> onStartResult.accept(success));
+    /** 处理单个客户端连接的全部请求，直到断开 */
+    private void handleClient(Socket socket, String addr) {
+        Dispatcher dispatcher = new Dispatcher();
+        try (BufferedReader in = new BufferedReader(
+                new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
+             BufferedWriter out = new BufferedWriter(
+                new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8))) {
+
+            String line;
+            while ((line = in.readLine()) != null) {
+                if (line.trim().isEmpty()) continue;
+                log("[收] " + addr + " → " + line);
+                String resp = dispatcher.dispatch(line.trim());
+                log("[发] → " + addr + " : " + resp);
+                out.write(resp);
+                out.newLine();
+                out.flush();
+            }
+        } catch (IOException e) {
+            log("[异常] " + addr + " : " + e.getMessage());
+        } finally {
+            try { socket.close(); } catch (IOException ignored) {}
         }
     }
 
     public void stop() {
-        running.set(false);
-        if (threadPool != null) threadPool.shutdownNow();
-        if (serverSocket != null && !serverSocket.isClosed()) {
-            try { serverSocket.close(); } catch (IOException ignored) {}
-        }
-        appendLog("[服务端] 已停止");
+        running = false;
+        try { if (serverSocket != null) serverSocket.close(); } catch (IOException ignored) {}
+        log("服务端已停止");
     }
 
-    public boolean isRunning() { return running.get(); }
-    public int getClientCount() { return clientCount.get(); }
+    public boolean isRunning() { return running; }
 
-    // ==================== 回调 ====================
-    private void onClientMessage(String msg) {
-        SwingUtilities.invokeLater(() -> {
-            if (logArea != null) logArea.append(msg + "\n");
-        });
-    }
-    private void onClientDisconnect(String info) {
-        clientCount.decrementAndGet();
-        SwingUtilities.invokeLater(() -> {
-            if (logArea != null) logArea.append(info + "\n");
-        });
-    }
-    private void appendLog(String msg) {
+    private void log(String msg) {
         SwingUtilities.invokeLater(() -> {
             if (logArea != null) logArea.append(msg + "\n");
         });

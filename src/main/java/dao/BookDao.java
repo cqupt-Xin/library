@@ -83,20 +83,21 @@ public class BookDao {
     }
 
     public boolean addBook(Book book) {
-        String sql = "INSERT INTO book_info (book_name, author, publish, ISBN, introduction, book_language, price, pubdate, class_id, pressmark, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        String sql = "INSERT INTO book_info (book_id, book_name, author, publish, ISBN, introduction, book_language, price, pubdate, class_id, pressmark, state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         try (Connection conn = DBUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, book.getBookName());
-            ps.setString(2, book.getAuthor());
-            ps.setString(3, book.getPublish());
-            ps.setString(4, book.getIsbn());
-            ps.setString(5, book.getIntroduction());
-            ps.setString(6, book.getBookLanguage());
-            ps.setBigDecimal(7, book.getPrice());
-            ps.setString(8, book.getPubdate());
-            setIntOrNull(ps, 9, book.getClassId());
-            setIntOrNull(ps, 10, book.getPressmark());
-            setIntOrNull(ps, 11, book.getState());
+            setLongOrNull(ps, 1, book.getBookId());
+            ps.setString(2, book.getBookName());
+            ps.setString(3, book.getAuthor());
+            ps.setString(4, book.getPublish());
+            ps.setString(5, book.getIsbn());
+            ps.setString(6, book.getIntroduction());
+            ps.setString(7, book.getBookLanguage());
+            ps.setBigDecimal(8, book.getPrice());
+            ps.setString(9, book.getPubdate());
+            setIntOrNull(ps, 10, book.getClassId());
+            setIntOrNull(ps, 11, book.getPressmark());
+            setIntOrNull(ps, 12, book.getState());
             return ps.executeUpdate() > 0;
         } catch (SQLException e) {
             e.printStackTrace();
@@ -196,6 +197,14 @@ public class BookDao {
             ps.setInt(index, value);
         } else {
             ps.setNull(index, java.sql.Types.INTEGER);
+        }
+    }
+
+    private void setLongOrNull(PreparedStatement ps, int index, Long value) throws SQLException {
+        if (value != null) {
+            ps.setLong(index, value);
+        } else {
+            ps.setNull(index, java.sql.Types.BIGINT);
         }
     }
 }

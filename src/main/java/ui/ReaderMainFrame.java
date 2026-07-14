@@ -8,6 +8,7 @@ import java.awt.*;
 public class ReaderMainFrame extends JFrame {
 
     private final User reader;
+    private ServerMonitorDialog monitorDialog;
 
     public ReaderMainFrame(User reader) {
         this.reader = reader;
@@ -27,8 +28,9 @@ public class ReaderMainFrame extends JFrame {
         panel.add(titleLabel, gbc);
 
         gbc.gridwidth = 1;
-        gbc.gridy = 1; gbc.gridx = 0;
 
+        // Row 1: 借阅图书 | 我的借阅
+        gbc.gridy = 1; gbc.gridx = 0;
         JButton borrowBtn = new JButton("借阅图书");
         styleButton(borrowBtn);
         panel.add(borrowBtn, gbc);
@@ -38,19 +40,40 @@ public class ReaderMainFrame extends JFrame {
         styleButton(myBorrowBtn);
         panel.add(myBorrowBtn, gbc);
 
-        gbc.gridy = 2; gbc.gridx = 0; gbc.gridwidth = 2;
+        // Row 2: 启动服务器 | 退出登录
+        gbc.gridy = 2; gbc.gridx = 0;
+        JButton serverBtn = new JButton("启动服务器");
+        styleButton(serverBtn);
+        serverBtn.setToolTipText("启动本地 TCP 服务器，等待 NetAssist 客户端连接");
+        panel.add(serverBtn, gbc);
+
+        gbc.gridx = 1;
         JButton logoutBtn = new JButton("退出登录");
         styleButton(logoutBtn);
         panel.add(logoutBtn, gbc);
 
+        // — 事件绑定 —
         borrowBtn.addActionListener(e -> new BookBrowseDialog(this, reader).setVisible(true));
         myBorrowBtn.addActionListener(e -> new MyBorrowDialog(this, reader).setVisible(true));
+        serverBtn.addActionListener(e -> openServerMonitor());
         logoutBtn.addActionListener(e -> {
+            if (monitorDialog != null) {
+                monitorDialog.shutdownServer();
+                monitorDialog.dispose();
+            }
             dispose();
             new LoginFrame().setVisible(true);
         });
 
         setContentPane(panel);
+    }
+
+    private void openServerMonitor() {
+        if (monitorDialog == null) {
+            monitorDialog = new ServerMonitorDialog(this);
+        }
+        monitorDialog.setVisible(true);
+        monitorDialog.toFront();
     }
 
     private void styleButton(JButton btn) {

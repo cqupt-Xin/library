@@ -282,7 +282,6 @@ public class ImportExportService {
                 JsonObject obj = data.get(i).getAsJsonObject();
                 // 数据格式校验
                 validateBookRecord(obj, i + 1);
-
                 Book book = jsonToBook(obj);
                 Book existing = bookDao.findById(book.getBookId());
 
@@ -297,11 +296,8 @@ public class ImportExportService {
                         result.addSkip("第" + (i + 1) + "条: 图书ID=" + book.getBookId() + " 已存在，跳过");
                     }
                 } else {
-                    if (bookDao.addBook(book)) {
-                        result.addSuccess();
-                    } else {
-                        result.addFail("第" + (i + 1) + "条: 图书 '" + book.getBookName() + "' 插入失败");
-                    }
+                    insertBook(book);
+                    result.addNew();
                 }
             } catch (Exception e) {
                 result.addFail("第" + (i + 1) + "条: " + e.getMessage());
@@ -316,6 +312,34 @@ public class ImportExportService {
             progressCallback.onComplete(result.getSummary());
         }
         return result;
+    }
+
+    /** 直接向 book_info 插入记录，含 book_id，抛出异常以报告真实错误 */
+    private void insertBook(Book book) throws SQLException {
+        String sql = "INSERT INTO book_info (book_id, book_name, author, publish, ISBN, introduction, "
+                + "book_language, price, pubdate, class_id, pressmark, state) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        try (Connection conn = DBUtil.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setLong(1, book.getBookId());
+            ps.setString(2, book.getBookName());
+            ps.setString(3, book.getAuthor());
+            ps.setString(4, book.getPublish());
+            ps.setString(5, book.getIsbn());
+            ps.setString(6, book.getIntroduction());
+            ps.setString(7, book.getBookLanguage());
+            ps.setBigDecimal(8, book.getPrice());
+            ps.setString(9, book.getPubdate());
+            setIntOrNull(ps, 10, book.getClassId());
+            setIntOrNull(ps, 11, book.getPressmark());
+            setIntOrNull(ps, 12, book.getState());
+            ps.executeUpdate();
+        }
+    }
+
+    private void setIntOrNull(PreparedStatement ps, int index, Integer value) throws SQLException {
+        if (value != null) ps.setInt(index, value);
+        else ps.setNull(index, Types.INTEGER);
     }
 
     /**

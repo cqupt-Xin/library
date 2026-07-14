@@ -11,448 +11,264 @@ import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.*;
 import java.io.File;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 
 /**
- * 数据导入/导出对话框
- * 提供图书、借阅记录、读者信息、分类信息的 JSON 格式导入与导出功能
+ * 图书信息导入/导出对话框
+ * 仅支持图书信息的 JSON 导入导出，重复数据自动更新
  */
 public class ImportExportDialog extends JDialog {
 
     private final JFrame parent;
     private final ImportExportService service = new ImportExportService();
 
-    // 导出组件
-    private JComboBox<String> exportTypeCombo;
-    private JProgressBar exportProgressBar;
-    private JTextArea exportStatusArea;
+    private JProgressBar exportBar;
+    private JTextArea exportArea;
     private JButton exportBtn;
 
-    // 导入组件
     private JTextField importFileField;
-    private JComboBox<String> duplicateStrategyCombo;
-    private JProgressBar importProgressBar;
-    private JTextArea importStatusArea;
+    private JProgressBar importBar;
+    private JTextArea importArea;
     private JButton importBtn;
     private JButton chooseFileBtn;
-    private JLabel importTypeLabel;
 
-    private String selectedImportFilePath = null;
+    private String selectedFile;
 
     public ImportExportDialog(JFrame parent) {
-        super(parent, "数据导入 / 导出", true);
+        super(parent, "图书信息导入 / 导出", true);
         this.parent = parent;
         initUI();
     }
 
     private void initUI() {
-        setSize(650, 520);
+        setSize(600, 520);
         setLocationRelativeTo(parent);
         setResizable(false);
 
-        JTabbedPane tabbedPane = new JTabbedPane();
-        tabbedPane.setFont(new Font("微软雅黑", Font.PLAIN, 14));
-
-        tabbedPane.addTab("导出数据", createExportPanel());
-        tabbedPane.addTab("导入数据", createImportPanel());
-
-        setContentPane(tabbedPane);
+        JTabbedPane tabs = new JTabbedPane();
+        tabs.setFont(new Font("微软雅黑", Font.PLAIN, 14));
+        tabs.addTab("导出图书", createExportPanel());
+        tabs.addTab("导入图书", createImportPanel());
+        setContentPane(tabs);
     }
 
     // ========================= 导出面板 =========================
 
     private JPanel createExportPanel() {
-        JPanel panel = new JPanel(new BorderLayout(10, 10));
+        JPanel panel = new JPanel(new BorderLayout(0, 10));
         panel.setBorder(new EmptyBorder(15, 15, 15, 15));
 
-        // 顶部选项区
-        JPanel topPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 5));
+        JPanel top = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 5));
+        JLabel label = new JLabel("导出全部图书信息为 JSON 文件");
+        label.setFont(new Font("微软雅黑", Font.PLAIN, 14));
+        top.add(label);
 
-        JLabel typeLabel = new JLabel("选择导出数据类型:");
-        typeLabel.setFont(new Font("微软雅黑", Font.PLAIN, 14));
-        topPanel.add(typeLabel);
+        exportBtn = styleBtn("导出到文件", new Color(46, 139, 87), 140, 35);
+        top.add(exportBtn);
+        panel.add(top, BorderLayout.NORTH);
 
-        exportTypeCombo = new JComboBox<>(new String[]{"图书信息", "借阅记录", "读者信息", "图书分类"});
-        exportTypeCombo.setFont(new Font("微软雅黑", Font.PLAIN, 14));
-        exportTypeCombo.setPreferredSize(new Dimension(150, 30));
-        topPanel.add(exportTypeCombo);
+        JPanel center = new JPanel(new BorderLayout(5, 5));
+        center.setBorder(new TitledBorder("导出状态"));
 
-        exportBtn = new JButton("导出到文件");
-        styleButton(exportBtn, new Color(46, 139, 87), 150, 35);
-        topPanel.add(exportBtn);
+        exportBar = new JProgressBar(0, 100);
+        exportBar.setStringPainted(true);
+        exportBar.setFont(new Font("微软雅黑", Font.PLAIN, 12));
+        center.add(exportBar, BorderLayout.NORTH);
 
-        panel.add(topPanel, BorderLayout.NORTH);
+        exportArea = createStatusArea();
+        center.add(new JScrollPane(exportArea), BorderLayout.CENTER);
+        panel.add(center, BorderLayout.CENTER);
 
-        // 中间进度区
-        JPanel centerPanel = new JPanel(new BorderLayout(5, 5));
-        centerPanel.setBorder(new TitledBorder("导出状态"));
-
-        exportProgressBar = new JProgressBar(0, 100);
-        exportProgressBar.setStringPainted(true);
-        exportProgressBar.setFont(new Font("微软雅黑", Font.PLAIN, 12));
-        centerPanel.add(exportProgressBar, BorderLayout.NORTH);
-
-        exportStatusArea = new JTextArea();
-        exportStatusArea.setEditable(false);
-        exportStatusArea.setFont(new Font("微软雅黑", Font.PLAIN, 13));
-        exportStatusArea.setLineWrap(true);
-        exportStatusArea.setWrapStyleWord(true);
-        JScrollPane scrollPane = new JScrollPane(exportStatusArea);
-        scrollPane.setPreferredSize(new Dimension(580, 200));
-        centerPanel.add(scrollPane, BorderLayout.CENTER);
-
-        panel.add(centerPanel, BorderLayout.CENTER);
-
-        // 事件绑定
-        exportBtn.addActionListener(e -> performExport());
-
+        exportBtn.addActionListener(e -> doExport());
         return panel;
     }
 
-    private void performExport() {
-        // 选择保存路径
-        JFileChooser fileChooser = new JFileChooser();
-        fileChooser.setDialogTitle("选择导出文件保存位置");
-        fileChooser.setFileFilter(new FileNameExtensionFilter("JSON 文件 (*.json)", "json"));
-        fileChooser.setSelectedFile(new File(getDefaultExportFileName()));
+    private void doExport() {
+        JFileChooser fc = new JFileChooser();
+        fc.setDialogTitle("选择导出位置");
+        fc.setFileFilter(new FileNameExtensionFilter("JSON 文件 (*.json)", "json"));
+        fc.setSelectedFile(new File("图书信息_" + java.time.LocalDate.now() + ".json"));
+        if (fc.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return;
 
-        if (fileChooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) {
-            return;
-        }
+        String path = fc.getSelectedFile().getAbsolutePath();
+        if (!path.toLowerCase().endsWith(".json")) path += ".json";
+        final String filePath = path;
 
-        String filePath = fileChooser.getSelectedFile().getAbsolutePath();
-        if (!filePath.toLowerCase().endsWith(".json")) {
-            filePath += ".json";
-        }
-
-        // 禁用按钮，防止重复操作
         exportBtn.setEnabled(false);
-        exportProgressBar.setValue(0);
-        exportStatusArea.setText("");
-        String selectedType = (String) exportTypeCombo.getSelectedItem();
+        exportBar.setValue(0);
+        exportArea.setText("");
 
-        // 使用 SwingWorker 后台执行
-        final String finalFilePath = filePath;
         new SwingWorker<Integer, String>() {
             @Override
             protected Integer doInBackground() throws Exception {
                 try {
-                    ProgressCallback callback = new ProgressCallback() {
-                        @Override
-                        public void onStart(String message, int total) {
-                            publish("[开始] " + message);
+                    return service.exportBooks(filePath, new ProgressCallback() {
+                        public void onStart(String msg, int total) {
+                            publish("[开始] " + msg);
                             SwingUtilities.invokeLater(() -> {
-                                exportProgressBar.setMaximum(total > 0 ? total : 1);
-                                exportProgressBar.setValue(0);
+                                exportBar.setMaximum(total > 0 ? total : 1);
+                                exportBar.setValue(0);
                             });
                         }
-
-                        @Override
-                        public void onProgress(int current, int total) {
-                            publish("[进度] " + current + " / " + total);
-                            SwingUtilities.invokeLater(() -> exportProgressBar.setValue(current));
+                        public void onProgress(int cur, int total) {
+                            publish("[进度] " + cur + " / " + total);
+                            SwingUtilities.invokeLater(() -> exportBar.setValue(cur));
                         }
-
-                        @Override
-                        public void onComplete(String message) {
-                            publish("[完成] " + message);
-                        }
-                    };
-
-                    switch (selectedType) {
-                        case "图书信息":
-                            return service.exportBooks(finalFilePath, callback);
-                        case "借阅记录":
-                            return service.exportBorrows(finalFilePath, callback);
-                        case "读者信息":
-                            return service.exportReaders(finalFilePath, callback);
-                        case "图书分类":
-                            return service.exportClasses(finalFilePath, callback);
-                        default:
-                            throw new IllegalArgumentException("未知的数据类型");
-                    }
-                } catch (IOException e) {
-                    publish("[错误] " + e.getMessage());
-                    return -1;
-                }
+                        public void onComplete(String msg) { publish("[完成] " + msg); }
+                    });
+                } catch (IOException e) { publish("[错误] " + e.getMessage()); return -1; }
             }
-
             @Override
             protected void process(java.util.List<String> chunks) {
-                for (String msg : chunks) {
-                    exportStatusArea.append(msg + "\n");
-                }
-                exportStatusArea.setCaretPosition(exportStatusArea.getDocument().getLength());
+                for (String s : chunks) exportArea.append(s + "\n");
             }
-
             @Override
             protected void done() {
                 try {
-                    int count = get();
-                    if (count >= 0) {
-                        exportProgressBar.setValue(exportProgressBar.getMaximum());
-                        exportStatusArea.append("------ 导出成功，文件保存至: " + finalFilePath + " ------\n");
+                    if (get() >= 0) {
+                        exportBar.setValue(exportBar.getMaximum());
+                        exportArea.append("------ 导出成功: " + filePath + " ------\n");
                     }
-                } catch (Exception e) {
-                    exportStatusArea.append("[错误] 导出失败: " + e.getMessage() + "\n");
-                }
+                } catch (Exception e) { exportArea.append("[错误] " + e.getMessage() + "\n"); }
                 exportBtn.setEnabled(true);
             }
         }.execute();
     }
 
-    private String getDefaultExportFileName() {
-        String type = (String) exportTypeCombo.getSelectedItem();
-        String prefix;
-        switch (type) {
-            case "图书信息": prefix = "图书信息"; break;
-            case "借阅记录": prefix = "借阅记录"; break;
-            case "读者信息": prefix = "读者信息"; break;
-            case "图书分类": prefix = "图书分类"; break;
-            default: prefix = "导出数据";
-        }
-        return prefix + "_" + java.time.LocalDate.now() + ".json";
-    }
-
     // ========================= 导入面板 =========================
 
     private JPanel createImportPanel() {
-        JPanel panel = new JPanel(new BorderLayout(10, 10));
+        JPanel panel = new JPanel(new BorderLayout(0, 10));
         panel.setBorder(new EmptyBorder(15, 15, 15, 15));
 
-        // 顶部文件选择区
-        JPanel topPanel = new JPanel();
-        topPanel.setLayout(new BoxLayout(topPanel, BoxLayout.Y_AXIS));
+        // 顶部：两行独立布局，避免按钮被底部容器裁切
+        JPanel top = new JPanel();
+        top.setLayout(new BoxLayout(top, BoxLayout.Y_AXIS));
 
-        // 文件选择行
-        JPanel filePanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 5));
-        JLabel fileLabel = new JLabel("选择导入文件:");
+        // 行1：文件选择
+        JPanel row1 = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 3));
+        JLabel fileLabel = new JLabel("选择文件:");
         fileLabel.setFont(new Font("微软雅黑", Font.PLAIN, 14));
-        filePanel.add(fileLabel);
+        row1.add(fileLabel);
 
-        importFileField = new JTextField(30);
+        importFileField = new JTextField(28);
         importFileField.setFont(new Font("微软雅黑", Font.PLAIN, 13));
         importFileField.setEditable(false);
-        filePanel.add(importFileField);
+        row1.add(importFileField);
 
-        chooseFileBtn = new JButton("浏览...");
-        styleButton(chooseFileBtn, new Color(70, 130, 180), 90, 30);
-        filePanel.add(chooseFileBtn);
+        chooseFileBtn = styleBtn("浏览...", new Color(70, 130, 180), 90, 30);
+        row1.add(chooseFileBtn);
 
-        topPanel.add(filePanel);
+        // 行2：导入按钮 + 提示
+        JPanel row2 = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 3));
 
-        // 选项行
-        JPanel optionPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 5));
+        importBtn = styleBtn("开始导入", new Color(220, 80, 60), 120, 35);
+        row2.add(importBtn);
 
-        JLabel typeLabel = new JLabel("检测类型:");
-        typeLabel.setFont(new Font("微软雅黑", Font.PLAIN, 14));
-        optionPanel.add(typeLabel);
+        JLabel hint = new JLabel("重复图书自动更新");
+        hint.setFont(new Font("微软雅黑", Font.ITALIC, 12));
+        hint.setForeground(Color.GRAY);
+        row2.add(hint);
 
-        importTypeLabel = new JLabel("(请先选择文件)");
-        importTypeLabel.setFont(new Font("微软雅黑", Font.PLAIN, 13));
-        importTypeLabel.setForeground(Color.GRAY);
-        optionPanel.add(importTypeLabel);
+        top.add(row1);
+        top.add(Box.createVerticalStrut(2));
+        top.add(row2);
+        panel.add(top, BorderLayout.NORTH);
 
-        optionPanel.add(Box.createHorizontalStrut(20));
+        // 状态区
+        JPanel center = new JPanel(new BorderLayout(5, 5));
+        center.setBorder(new TitledBorder("导入状态"));
 
-        JLabel strategyLabel = new JLabel("重复数据处理:");
-        strategyLabel.setFont(new Font("微软雅黑", Font.PLAIN, 14));
-        optionPanel.add(strategyLabel);
+        importBar = new JProgressBar(0, 100);
+        importBar.setStringPainted(true);
+        importBar.setFont(new Font("微软雅黑", Font.PLAIN, 12));
+        center.add(importBar, BorderLayout.NORTH);
 
-        duplicateStrategyCombo = new JComboBox<>(new String[]{"跳过已存在的记录", "更新已存在的记录"});
-        duplicateStrategyCombo.setFont(new Font("微软雅黑", Font.PLAIN, 14));
-        duplicateStrategyCombo.setPreferredSize(new Dimension(180, 30));
-        optionPanel.add(duplicateStrategyCombo);
+        importArea = createStatusArea();
+        center.add(new JScrollPane(importArea), BorderLayout.CENTER);
+        panel.add(center, BorderLayout.CENTER);
 
-        importBtn = new JButton("开始导入");
-        styleButton(importBtn, new Color(220, 80, 60), 120, 35);
-        optionPanel.add(importBtn);
-
-        topPanel.add(optionPanel);
-        panel.add(topPanel, BorderLayout.NORTH);
-
-        // 中间进度区
-        JPanel centerPanel = new JPanel(new BorderLayout(5, 5));
-        centerPanel.setBorder(new TitledBorder("导入状态"));
-
-        importProgressBar = new JProgressBar(0, 100);
-        importProgressBar.setStringPainted(true);
-        importProgressBar.setFont(new Font("微软雅黑", Font.PLAIN, 12));
-        centerPanel.add(importProgressBar, BorderLayout.NORTH);
-
-        importStatusArea = new JTextArea();
-        importStatusArea.setEditable(false);
-        importStatusArea.setFont(new Font("微软雅黑", Font.PLAIN, 13));
-        importStatusArea.setLineWrap(true);
-        importStatusArea.setWrapStyleWord(true);
-        JScrollPane scrollPane = new JScrollPane(importStatusArea);
-        scrollPane.setPreferredSize(new Dimension(580, 200));
-        centerPanel.add(scrollPane, BorderLayout.CENTER);
-
-        panel.add(centerPanel, BorderLayout.CENTER);
-
-        // 事件绑定
-        chooseFileBtn.addActionListener(e -> chooseImportFile());
-        importBtn.addActionListener(e -> performImport());
-
+        chooseFileBtn.addActionListener(e -> chooseFile());
+        importBtn.addActionListener(e -> doImport());
         return panel;
     }
 
-    private void chooseImportFile() {
-        JFileChooser fileChooser = new JFileChooser();
-        fileChooser.setDialogTitle("选择要导入的 JSON 文件");
-        fileChooser.setFileFilter(new FileNameExtensionFilter("JSON 文件 (*.json)", "json"));
+    private void chooseFile() {
+        JFileChooser fc = new JFileChooser();
+        fc.setDialogTitle("选择 JSON 文件");
+        fc.setFileFilter(new FileNameExtensionFilter("JSON 文件 (*.json)", "json"));
+        if (fc.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return;
 
-        if (fileChooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) {
+        File f = fc.getSelectedFile();
+        if (!f.exists() || !f.canRead()) {
+            JOptionPane.showMessageDialog(this, "无法读取文件: " + f.getAbsolutePath(),
+                    "错误", JOptionPane.ERROR_MESSAGE);
             return;
         }
-
-        File file = fileChooser.getSelectedFile();
-        if (!file.exists() || !file.canRead()) {
-            JOptionPane.showMessageDialog(this,
-                    "无法读取文件: " + file.getAbsolutePath() + "\n请检查文件是否存在且有读取权限。",
-                    "文件读取失败", JOptionPane.ERROR_MESSAGE);
-            return;
-        }
-
-        selectedImportFilePath = file.getAbsolutePath();
-        importFileField.setText(selectedImportFilePath);
-
-        // 尝试检测文件类型
-        detectFileType(selectedImportFilePath);
+        selectedFile = f.getAbsolutePath();
+        importFileField.setText(selectedFile);
     }
 
-    private void detectFileType(String filePath) {
-        try {
-            java.io.Reader reader = new java.io.InputStreamReader(
-                    new java.io.FileInputStream(filePath), StandardCharsets.UTF_8);
-            com.google.gson.JsonElement element = com.google.gson.JsonParser.parseReader(reader);
-            reader.close();
-
-            if (element.isJsonObject()) {
-                com.google.gson.JsonObject root = element.getAsJsonObject();
-                if (root.has("type")) {
-                    String type = root.get("type").getAsString();
-                    String typeLabel;
-                    switch (type) {
-                        case "books": typeLabel = "图书信息"; break;
-                        case "borrows": typeLabel = "借阅记录"; break;
-                        case "readers": typeLabel = "读者信息"; break;
-                        case "classes": typeLabel = "图书分类"; break;
-                        default: typeLabel = "未知类型: " + type;
-                    }
-                    importTypeLabel.setText(typeLabel);
-                    importTypeLabel.setForeground(new Color(46, 139, 87));
-                }
-            }
-        } catch (Exception e) {
-            importTypeLabel.setText("无法识别文件类型");
-            importTypeLabel.setForeground(Color.RED);
+    private void doImport() {
+        if (selectedFile == null || selectedFile.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "请先选择 JSON 文件", "提示", JOptionPane.WARNING_MESSAGE);
+            return;
         }
-    }
-
-    private void performImport() {
-        if (selectedImportFilePath == null || selectedImportFilePath.isEmpty()) {
-            JOptionPane.showMessageDialog(this,
-                    "请先选择一个要导入的 JSON 文件。",
-                    "未选择文件", JOptionPane.WARNING_MESSAGE);
+        if (!new File(selectedFile).canRead()) {
+            JOptionPane.showMessageDialog(this, "文件无法读取", "错误", JOptionPane.ERROR_MESSAGE);
             return;
         }
 
-        File file = new File(selectedImportFilePath);
-        if (!file.exists() || !file.canRead()) {
-            JOptionPane.showMessageDialog(this,
-                    "无法读取文件，请检查文件是否存在且有读取权限。",
-                    "文件读取失败", JOptionPane.ERROR_MESSAGE);
-            return;
-        }
+        if (JOptionPane.showConfirmDialog(this,
+                "即将导入: " + new File(selectedFile).getName() +
+                "\n重复图书将自动更新。\n\n确定开始？",
+                "确认", JOptionPane.YES_NO_OPTION) != JOptionPane.YES_OPTION) return;
 
-        // 确认对话框
-        String strategyText = (String) duplicateStrategyCombo.getSelectedItem();
-        int confirm = JOptionPane.showConfirmDialog(this,
-                "即将导入文件: " + file.getName() + "\n\n重复数据处理策略: " + strategyText +
-                "\n\n确定开始导入吗？",
-                "确认导入", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
-
-        if (confirm != JOptionPane.YES_OPTION) {
-            return;
-        }
-
-        // 禁用按钮
         importBtn.setEnabled(false);
         chooseFileBtn.setEnabled(false);
-        importProgressBar.setValue(0);
-        importStatusArea.setText("");
-
-        String duplicateStrategy = strategyText.contains("更新") ? "update" : "skip";
+        importBar.setValue(0);
+        importArea.setText("");
 
         new SwingWorker<ImportResult, String>() {
             @Override
             protected ImportResult doInBackground() throws Exception {
-                ProgressCallback callback = new ProgressCallback() {
-                    @Override
-                    public void onStart(String message, int total) {
-                        publish("[开始] " + message);
+                ProgressCallback cb = new ProgressCallback() {
+                    public void onStart(String msg, int total) {
+                        publish("[开始] " + msg);
                         SwingUtilities.invokeLater(() -> {
-                            importProgressBar.setMaximum(total > 0 ? total : 1);
-                            importProgressBar.setValue(0);
+                            importBar.setMaximum(total > 0 ? total : 1);
+                            importBar.setValue(0);
                         });
                     }
-
-                    @Override
-                    public void onProgress(int current, int total) {
-                        if (current % 5 == 0 || current == total) {
-                            publish("[进度] " + current + " / " + total);
-                            SwingUtilities.invokeLater(() -> importProgressBar.setValue(current));
+                    public void onProgress(int cur, int total) {
+                        if (cur % 5 == 0 || cur == total) {
+                            publish("[进度] " + cur + " / " + total);
+                            SwingUtilities.invokeLater(() -> importBar.setValue(cur));
                         }
                     }
-
-                    @Override
-                    public void onComplete(String message) {
-                        publish("[完成] " + message);
-                    }
+                    public void onComplete(String msg) { publish("[完成] " + msg); }
                 };
-
-                return service.importData(selectedImportFilePath, duplicateStrategy, callback);
+                return service.importBooks(selectedFile, cb);
             }
-
             @Override
             protected void process(java.util.List<String> chunks) {
-                for (String msg : chunks) {
-                    importStatusArea.append(msg + "\n");
-                }
-                importStatusArea.setCaretPosition(importStatusArea.getDocument().getLength());
+                for (String s : chunks) importArea.append(s + "\n");
             }
-
             @Override
             protected void done() {
                 try {
-                    ImportResult result = get();
-                    importProgressBar.setValue(importProgressBar.getMaximum());
-                    importStatusArea.append("\n" + result.getSummary() + "\n");
-
-                    // 根据结果显示不同图标
-                    if (result.getFailCount() == 0) {
-                        JOptionPane.showMessageDialog(ImportExportDialog.this,
-                                "导入完成!\n\n" +
-                                "成功: " + result.getSuccessCount() + " 条\n" +
-                                "跳过(重复): " + result.getSkipCount() + " 条\n" +
-                                "失败: " + result.getFailCount() + " 条",
-                                "导入完成", JOptionPane.INFORMATION_MESSAGE);
-                    } else {
-                        JOptionPane.showMessageDialog(ImportExportDialog.this,
-                                "导入完成，但有部分记录处理失败。\n\n" +
-                                "成功: " + result.getSuccessCount() + " 条\n" +
-                                "跳过(重复): " + result.getSkipCount() + " 条\n" +
-                                "失败: " + result.getFailCount() + " 条\n\n" +
-                                "请查看状态区域获取详细信息。",
-                                "导入完成(有错误)", JOptionPane.WARNING_MESSAGE);
-                    }
-                } catch (Exception e) {
-                    importStatusArea.append("[错误] 导入失败: " + e.getMessage() + "\n");
+                    ImportResult r = get();
+                    importBar.setValue(importBar.getMaximum());
+                    importArea.append("\n" + r.getSummary() + "\n");
                     JOptionPane.showMessageDialog(ImportExportDialog.this,
-                            "导入过程发生异常:\n" + e.getMessage(),
-                            "导入失败", JOptionPane.ERROR_MESSAGE);
+                            "导入完成!\n\n新增: " + (r.getSuccessCount() - r.getUpdateCount()) +
+                            " 条\n更新: " + r.getUpdateCount() + " 条\n失败: " + r.getFailCount() + " 条",
+                            "完成", r.getFailCount() == 0
+                                    ? JOptionPane.INFORMATION_MESSAGE
+                                    : JOptionPane.WARNING_MESSAGE);
+                } catch (Exception e) {
+                    importArea.append("[错误] " + e.getMessage() + "\n");
+                    JOptionPane.showMessageDialog(ImportExportDialog.this,
+                            "导入失败:\n" + e.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
                 }
                 importBtn.setEnabled(true);
                 chooseFileBtn.setEnabled(true);
@@ -460,15 +276,26 @@ public class ImportExportDialog extends JDialog {
         }.execute();
     }
 
-    // ========================= 样式工具方法 =========================
+    // ========================= 工具 =========================
 
-    private void styleButton(JButton btn, Color bgColor, int width, int height) {
-        btn.setPreferredSize(new Dimension(width, height));
+    private JTextArea createStatusArea() {
+        JTextArea area = new JTextArea();
+        area.setEditable(false);
+        area.setFont(new Font("微软雅黑", Font.PLAIN, 13));
+        area.setLineWrap(true);
+        area.setWrapStyleWord(true);
+        return area;
+    }
+
+    private JButton styleBtn(String text, Color bg, int w, int h) {
+        JButton btn = new JButton(text);
+        btn.setPreferredSize(new Dimension(w, h));
         btn.setFont(new Font("微软雅黑", Font.PLAIN, 14));
-        btn.setBackground(bgColor);
-        btn.setForeground(Color.WHITE);
+        btn.setBackground(bg);
+        btn.setForeground(Color.BLACK);
         btn.setFocusPainted(false);
-        btn.setBorderPainted(false);
         btn.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        btn.setMargin(new Insets(4, 12, 4, 12));
+        return btn;
     }
 }
