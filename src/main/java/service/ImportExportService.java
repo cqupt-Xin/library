@@ -216,6 +216,7 @@ public class ImportExportService {
         }
 
         public void addSuccess() { successCount++; }
+        public void addNew() { successCount++; }
         public void addSkip(String reason) { skipCount++; errors.add("[跳过] " + reason); }
         public void addUpdate() { updateCount++; successCount++; }
         public void addFail(String reason) { failCount++; errors.add("[失败] " + reason); }
@@ -259,6 +260,10 @@ public class ImportExportService {
                 default: return type;
             }
         }
+    }
+
+    public ImportResult importBooks(String filePath, ProgressCallback progressCallback) throws IOException {
+        return importBooks(filePath, "update", progressCallback);
     }
 
     /**
