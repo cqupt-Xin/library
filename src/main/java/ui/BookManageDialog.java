@@ -1,29 +1,33 @@
 package ui;
 
+import client.ClientNetworkService;
 import model.Book;
 import model.ClassInfo;
-import service.BookService;
 
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
+import java.io.IOException;
 import java.math.BigDecimal;
 import java.util.List;
 
+/**
+ * 图书管理对话框 — 实验九 C/S 模式
+ * 通过 ClientNetworkService 与后台服务器通信
+ */
 public class BookManageDialog extends JDialog {
 
-    private final BookService bookService = new BookService();
     private JTable table;
     private DefaultTableModel tableModel;
     private JTextField searchField;
     private JComboBox<String> classCombo;
 
     public BookManageDialog(Frame owner) {
-        super(owner, "图书管理", true);
+        super(owner, "图书管理 (C/S模式)", true);
         setSize(1000, 550);
         setLocationRelativeTo(owner);
 
-        // 顶部工具栏
+        // 工具栏
         JPanel topPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
 
         searchField = new JTextField(12);
@@ -35,9 +39,11 @@ public class BookManageDialog extends JDialog {
 
         classCombo = new JComboBox<>();
         classCombo.addItem("全部分类");
-        for (ClassInfo ci : bookService.getAllClasses()) {
-            classCombo.addItem(ci.getClassId() + " " + ci.getClassName());
-        }
+        try {
+            for (ClassInfo ci : ClientNetworkService.getInstance().getAllClasses()) {
+                classCombo.addItem(ci.getClassId() + " " + ci.getClassName());
+            }
+        } catch (IOException ignored) {}
         JButton filterBtn = new JButton("筛选");
 
         topPanel.add(new JLabel("关键词:"));
@@ -68,9 +74,17 @@ public class BookManageDialog extends JDialog {
         addBtn.addActionListener(e -> showEditDialog(null));
         editBtn.addActionListener(e -> editSelected());
         deleteBtn.addActionListener(e -> deleteSelected());
-        refreshBtn.addActionListener(e -> loadBooks(bookService.findAll()));
+        refreshBtn.addActionListener(e -> refreshAll());
 
-        loadBooks(bookService.findAll());
+        refreshAll();
+    }
+
+    private void refreshAll() {
+        try {
+            loadBooks(ClientNetworkService.getInstance().findAllBooks());
+        } catch (IOException e) {
+            showError("无法加载图书列表: " + e.getMessage());
+        }
     }
 
     private void loadBooks(List<Book> books) {
@@ -86,39 +100,58 @@ public class BookManageDialog extends JDialog {
 
     private void doSearch() {
         String kw = searchField.getText().trim();
-        if (kw.isEmpty()) {
-            loadBooks(bookService.findAll());
-        } else {
-            loadBooks(bookService.search(kw));
+        try {
+            if (kw.isEmpty()) {
+                loadBooks(ClientNetworkService.getInstance().findAllBooks());
+            } else {
+                loadBooks(ClientNetworkService.getInstance().searchBooks(kw));
+            }
+        } catch (IOException e) {
+            showError("搜索失败: " + e.getMessage());
         }
     }
 
     private void doFilter() {
         String selected = (String) classCombo.getSelectedItem();
         if (selected == null || "全部分类".equals(selected)) {
-            loadBooks(bookService.findAll());
+            refreshAll();
         } else {
-            int classId = Integer.parseInt(selected.split(" ")[0]);
-            loadBooks(bookService.findByClassId(classId));
+            try {
+                int classId = Integer.parseInt(selected.split(" ")[0]);
+                loadBooks(ClientNetworkService.getInstance().findByClassId(classId));
+            } catch (Exception e) {
+                showError("筛选失败: " + e.getMessage());
+            }
         }
     }
 
     private void editSelected() {
         int row = table.getSelectedRow();
-        if (row < 0) { JOptionPane.showMessageDialog(this, "请先选择一本图书"); return; }
+        if (row < 0) { showError("请先选择一本图书"); return; }
         Long bookId = (Long) tableModel.getValueAt(row, 0);
-        Book book = bookService.findById(bookId);
-        if (book != null) showEditDialog(book);
+        try {
+            Book book = ClientNetworkService.getInstance().findBookById(bookId);
+            if (book != null) showEditDialog(book);
+        } catch (IOException e) {
+            showError("查询失败: " + e.getMessage());
+        }
     }
 
     private void deleteSelected() {
         int row = table.getSelectedRow();
-        if (row < 0) { JOptionPane.showMessageDialog(this, "请先选择一本图书"); return; }
+        if (row < 0) { showError("请先选择一本图书"); return; }
         Long bookId = (Long) tableModel.getValueAt(row, 0);
         int r = JOptionPane.showConfirmDialog(this, "确认删除该图书?");
         if (r == JOptionPane.YES_OPTION) {
-            bookService.deleteBook(bookId);
-            loadBooks(bookService.findAll());
+            try {
+                if (ClientNetworkService.getInstance().deleteBook(bookId)) {
+                    refreshAll();
+                } else {
+                    showError("删除失败");
+                }
+            } catch (IOException e) {
+                showError("删除失败: " + e.getMessage());
+            }
         }
     }
 
@@ -144,16 +177,19 @@ public class BookManageDialog extends JDialog {
         JTextField dateField = new JTextField(isEdit && book.getPubdate() != null ? book.getPubdate() : "", 18);
         JTextField pressmarkField = new JTextField(isEdit && book.getPressmark() != null ? String.valueOf(book.getPressmark()) : "", 18);
 
-        JComboBox<String> classCombo = new JComboBox<>();
-        for (ClassInfo ci : bookService.getAllClasses()) {
-            classCombo.addItem(ci.getClassId() + " " + ci.getClassName());
-            if (isEdit && book.getClassId() != null && book.getClassId() == ci.getClassId()) {
-                classCombo.setSelectedItem(ci.getClassId() + " " + ci.getClassName());
+        JComboBox<String> classComboLocal = new JComboBox<>();
+        try {
+            for (ClassInfo ci : ClientNetworkService.getInstance().getAllClasses()) {
+                classComboLocal.addItem(ci.getClassId() + " " + ci.getClassName());
+                if (isEdit && book.getClassId() != null && book.getClassId() == ci.getClassId()) {
+                    classComboLocal.setSelectedItem(ci.getClassId() + " " + ci.getClassName());
+                }
             }
-        }
+        } catch (IOException ignored) {}
 
         String[] labels = {"书名:", "作者:", "出版社:", "ISBN:", "简介:", "语言:", "价格:", "出版日期:", "分类:", "索书号:"};
-        java.awt.Component[] fields = {nameField, authorField, pubField, isbnField, introScroll, langField, priceField, dateField, classCombo, pressmarkField};
+        java.awt.Component[] fields = {nameField, authorField, pubField, isbnField, introScroll,
+                langField, priceField, dateField, classComboLocal, pressmarkField};
 
         for (int i = 0; i < labels.length; i++) {
             gbc.gridx = 0; gbc.gridy = i; gbc.anchor = GridBagConstraints.EAST;
@@ -173,9 +209,9 @@ public class BookManageDialog extends JDialog {
                 String name = nameField.getText().trim();
                 String author = authorField.getText().trim();
                 if (name.isEmpty() || author.isEmpty()) {
-                    JOptionPane.showMessageDialog(dialog, "书名和作者不能为空"); return;
+                    showError("书名和作者不能为空"); return;
                 }
-                String selected = (String) classCombo.getSelectedItem();
+                String selected = (String) classComboLocal.getSelectedItem();
                 Integer classId = null;
                 if (selected != null && !selected.isEmpty()) {
                     classId = Integer.parseInt(selected.split(" ")[0]);
@@ -195,19 +231,27 @@ public class BookManageDialog extends JDialog {
                 current.setPressmark(pm.isEmpty() ? null : Integer.parseInt(pm));
                 if (!isEdit) current.setState(0);
 
-                boolean ok = isEdit ? bookService.updateBook(current) : bookService.addBook(current);
+                boolean ok = isEdit
+                        ? ClientNetworkService.getInstance().updateBook(current)
+                        : ClientNetworkService.getInstance().addBook(current);
                 if (ok) {
                     dialog.dispose();
-                    loadBooks(bookService.findAll());
+                    refreshAll();
                 } else {
-                    JOptionPane.showMessageDialog(dialog, "保存失败");
+                    showError("保存失败");
                 }
             } catch (NumberFormatException ex) {
-                JOptionPane.showMessageDialog(dialog, "请检查数字字段格式");
+                showError("请检查数字字段格式");
+            } catch (IOException ex) {
+                showError("通信失败: " + ex.getMessage());
             }
         });
 
         dialog.setContentPane(panel);
         dialog.setVisible(true);
+    }
+
+    private void showError(String msg) {
+        JOptionPane.showMessageDialog(this, msg);
     }
 }

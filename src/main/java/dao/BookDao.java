@@ -153,7 +153,7 @@ public class BookDao {
         return false;
     }
 
-    // ==================== 分类 ====================
+
 
     public List<ClassInfo> getAllClasses() {
         List<ClassInfo> list = new ArrayList<>();
@@ -170,7 +170,7 @@ public class BookDao {
         return list;
     }
 
-    // ==================== 工具方法 ====================
+
 
     private Book rowToBook(ResultSet rs) throws SQLException {
         Book book = new Book();

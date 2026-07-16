@@ -5,29 +5,47 @@ import java.io.*;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.nio.charset.StandardCharsets;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
 /**
- * TCP 命令服务器 — 单线程阻塞模式
- * 一次仅处理一个客户端连接，逻辑直接内联，无线程池/并发控制。
+ * 图书管理系统后台服务器 — 实验九 C/S 模式 + 实验十 多线程
+ * 使用线程池处理多个客户端并发连接
  */
 public class BookCommandServer {
 
     private final int port;
     private ServerSocket serverSocket;
     private volatile boolean running;
-    private JTextArea logArea;
+    private ExecutorService threadPool;
+
+    private static final AtomicInteger CLIENT_THREAD_COUNTER = new AtomicInteger(1);
+    private static final int THREAD_POOL_SIZE = 20;
 
     public BookCommandServer(int port) { this.port = port; }
     public BookCommandServer() { this(8888); }
 
     /**
-     * 启动服务器（后台线程中执行 accept 循环）
+     * 启动服务器 — 兼容原有 JTextArea 接口
      */
     public void start(JTextArea logArea, Consumer<Boolean> onResult) {
-        if (running) { log("服务器已在运行中"); return; }
-        this.logArea = logArea;
+        start(msg -> {
+            SwingUtilities.invokeLater(() -> {
+                if (logArea != null) logArea.append(msg + "\n");
+            });
+        }, onResult);
+    }
+
+    /**
+     * 启动服务器（线程池模式）
+     */
+    public void start(Consumer<String> logConsumer, Consumer<Boolean> onResult) {
+        if (running) {
+            if (logConsumer != null) logConsumer.accept("服务器已在运行中");
+            return;
+        }
 
         Thread t = new Thread(() -> {
             try {
@@ -35,70 +53,57 @@ public class BookCommandServer {
                 serverSocket.setReuseAddress(true);
                 serverSocket.bind(new InetSocketAddress("127.0.0.1", port));
                 running = true;
-                SwingUtilities.invokeLater(() -> onResult.accept(true));
+                threadPool = Executors.newFixedThreadPool(THREAD_POOL_SIZE,
+                        r -> {
+                            Thread thread = new Thread(r,
+                                    "ClientHandler-" + CLIENT_THREAD_COUNTER.getAndIncrement());
+                            thread.setDaemon(true);
+                            return thread;
+                        });
 
-                log("========================================");
-                log("服务端绑定成功 — 127.0.0.1:" + port);
-                log("NetAssist 配置: TCP Client → 127.0.0.1:" + port);
-                log("========================================");
+                SwingUtilities.invokeLater(() -> {
+                    if (onResult != null) onResult.accept(true);
+                });
+
+                Consumer<String> safeLog = logConsumer != null ? logConsumer : msg -> {};
+                safeLog.accept("========================================");
+                safeLog.accept("服务端绑定成功 — 127.0.0.1:" + port);
+                safeLog.accept("线程池大小: " + THREAD_POOL_SIZE + " | 支持多客户端并发");
+                safeLog.accept("========================================");
 
                 while (running) {
                     try {
                         Socket client = serverSocket.accept();
-                        String addr = client.getInetAddress().getHostAddress() + ":" + client.getPort();
-                        log("[连接] " + addr);
-                        handleClient(client, addr);
-                        log("[断开] " + addr);
+                        // 实验十：每个客户端连接提交到线程池中独立处理
+                        threadPool.submit(new ClientHandler(client, safeLog));
                     } catch (IOException e) {
-                        if (running) log("[错误] " + e.getMessage());
+                        if (running) safeLog.accept("[错误] " + e.getMessage());
                     }
                 }
             } catch (IOException e) {
                 running = false;
-                SwingUtilities.invokeLater(() -> onResult.accept(false));
-                log("[失败] 端口绑定失败: " + e.getMessage());
+                SwingUtilities.invokeLater(() -> {
+                    if (onResult != null) onResult.accept(false);
+                });
+                if (logConsumer != null) {
+                    logConsumer.accept("[失败] 端口绑定失败: " + e.getMessage());
+                }
             }
         }, "BookServer");
         t.setDaemon(true);
         t.start();
     }
 
-    /** 处理单个客户端连接的全部请求，直到断开 */
-    private void handleClient(Socket socket, String addr) {
-        Dispatcher dispatcher = new Dispatcher();
-        try (BufferedReader in = new BufferedReader(
-                new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
-             BufferedWriter out = new BufferedWriter(
-                new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8))) {
-
-            String line;
-            while ((line = in.readLine()) != null) {
-                if (line.trim().isEmpty()) continue;
-                log("[收] " + addr + " → " + line);
-                String resp = dispatcher.dispatch(line.trim());
-                log("[发] → " + addr + " : " + resp);
-                out.write(resp);
-                out.newLine();
-                out.flush();
-            }
-        } catch (IOException e) {
-            log("[异常] " + addr + " : " + e.getMessage());
-        } finally {
-            try { socket.close(); } catch (IOException ignored) {}
-        }
-    }
-
+    /**
+     * 停止服务器并关闭线程池
+     */
     public void stop() {
         running = false;
         try { if (serverSocket != null) serverSocket.close(); } catch (IOException ignored) {}
-        log("服务端已停止");
+        if (threadPool != null && !threadPool.isShutdown()) {
+            threadPool.shutdownNow();
+        }
     }
 
     public boolean isRunning() { return running; }
-
-    private void log(String msg) {
-        SwingUtilities.invokeLater(() -> {
-            if (logArea != null) logArea.append(msg + "\n");
-        });
-    }
 }

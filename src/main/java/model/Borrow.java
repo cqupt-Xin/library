@@ -1,7 +1,7 @@
 package model;
 
 public class Borrow {
-    private Long sernum;//Serial Number 序号
+    private Long sernum;
     private Long bookId;
     private int readerId;
     private String lendDate;

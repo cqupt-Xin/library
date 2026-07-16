@@ -13,9 +13,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 
-/**
- * 图书信息导入导出服务 —— 仅覆盖 UI 层实际调用的图书导入/导出
- */
+
 public class ImportExportService {
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
@@ -24,7 +22,7 @@ public class ImportExportService {
 
     private final BookDao bookDao = new BookDao();
 
-    // ==================== 导出 ====================
+    
 
     public int exportBooks(String filePath, ProgressCallback cb) throws IOException {
         List<Book> books = bookDao.findAll();
@@ -41,7 +39,7 @@ public class ImportExportService {
         return data.size();
     }
 
-    // ==================== 导入 ====================
+    
 
     public ImportResult importBooks(String filePath, ProgressCallback cb) throws IOException {
         JsonArray arr = readData(filePath);
@@ -71,7 +69,7 @@ public class ImportExportService {
         return r;
     }
 
-    // ==================== 进度回调工具 ====================
+    
 
     private static void fireStart(ProgressCallback cb, String msg, int total) {
         if (cb != null) cb.onStart(msg, total);
@@ -83,7 +81,7 @@ public class ImportExportService {
         if (cb != null) cb.onComplete(msg);
     }
 
-    // ==================== 文件读写 ====================
+    
 
     private void writeFile(String filePath, List<JsonObject> data) throws IOException {
         JsonObject root = new JsonObject();
@@ -112,7 +110,7 @@ public class ImportExportService {
         }
     }
 
-    // ==================== 校验 ====================
+    
 
     private void validate(JsonObject obj) {
         require(obj, "bookId"); require(obj, "bookName"); require(obj, "author"); require(obj, "publish");
@@ -131,7 +129,7 @@ public class ImportExportService {
             throw new IllegalArgumentException("缺少必填字段: " + field);
     }
 
-    // ==================== JSON ↔ 对象转换 ====================
+    
 
     private JsonObject bookToJson(Book b) {
         JsonObject o = new JsonObject();
@@ -175,7 +173,7 @@ public class ImportExportService {
         return obj.has(key) && !obj.get(key).isJsonNull() ? obj.get(key).getAsString() : null;
     }
 
-    // ==================== 数据库直接写入 ====================
+    
 
     private void insertBook(Book b) throws SQLException {
         String sql = "INSERT INTO book_info (book_id,book_name,author,publish,ISBN,introduction,"
@@ -196,7 +194,7 @@ public class ImportExportService {
         if (v != null) ps.setInt(idx, v); else ps.setNull(idx, Types.INTEGER);
     }
 
-    // ==================== 内部类 ====================
+    
 
     public static class ImportResult {
         private final int total;

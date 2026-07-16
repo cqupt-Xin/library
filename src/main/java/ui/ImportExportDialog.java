@@ -1,25 +1,25 @@
 package ui;
 
-import service.ImportExportService;
-import service.ImportExportService.ImportResult;
-import service.ImportExportService.ProgressCallback;
+import client.ClientNetworkService;
+import com.google.gson.*;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import javax.swing.border.TitledBorder;
 import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.*;
-import java.io.File;
-import java.io.IOException;
+import java.io.*;
+import java.nio.charset.StandardCharsets;
 
 /**
- * 图书信息导入/导出对话框
- * 仅支持图书信息的 JSON 导入导出，重复数据自动更新
+ * 导入导出对话框 — 实验九 C/S 模式
+ * 导出：客户端请求服务器获取 JSON → 客户端写文件
+ * 导入：客户端读文件 → 发送 JSON 到服务器 → 服务器入库
  */
 public class ImportExportDialog extends JDialog {
 
     private final JFrame parent;
-    private final ImportExportService service = new ImportExportService();
+    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
 
     private JProgressBar exportBar;
     private JTextArea exportArea;
@@ -30,11 +30,10 @@ public class ImportExportDialog extends JDialog {
     private JTextArea importArea;
     private JButton importBtn;
     private JButton chooseFileBtn;
-
     private String selectedFile;
 
     public ImportExportDialog(JFrame parent) {
-        super(parent, "图书信息导入 / 导出", true);
+        super(parent, "图书信息导入 / 导出 (C/S模式)", true);
         this.parent = parent;
         initUI();
     }
@@ -51,14 +50,12 @@ public class ImportExportDialog extends JDialog {
         setContentPane(tabs);
     }
 
-    // ========================= 导出面板 =========================
-
     private JPanel createExportPanel() {
         JPanel panel = new JPanel(new BorderLayout(0, 10));
         panel.setBorder(new EmptyBorder(15, 15, 15, 15));
 
         JPanel top = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 5));
-        JLabel label = new JLabel("导出全部图书信息为 JSON 文件");
+        JLabel label = new JLabel("从服务器导出全部图书信息为 JSON 文件");
         label.setFont(new Font("微软雅黑", Font.PLAIN, 14));
         top.add(label);
 
@@ -99,52 +96,60 @@ public class ImportExportDialog extends JDialog {
 
         new SwingWorker<Integer, String>() {
             @Override
-            protected Integer doInBackground() throws Exception {
+            protected Integer doInBackground() {
                 try {
-                    return service.exportBooks(filePath, new ProgressCallback() {
-                        public void onStart(String msg, int total) {
-                            publish("[开始] " + msg);
-                            SwingUtilities.invokeLater(() -> {
-                                exportBar.setMaximum(total > 0 ? total : 1);
-                                exportBar.setValue(0);
-                            });
-                        }
-                        public void onProgress(int cur, int total) {
-                            publish("[进度] " + cur + " / " + total);
-                            SwingUtilities.invokeLater(() -> exportBar.setValue(cur));
-                        }
-                        public void onComplete(String msg) { publish("[完成] " + msg); }
-                    });
-                } catch (IOException e) { publish("[错误] " + e.getMessage()); return -1; }
+                    publish("[开始] 正在从服务器获取图书数据...");
+                    SwingUtilities.invokeLater(() -> exportBar.setIndeterminate(true));
+
+                    // 实验九：从服务器获取导出数据
+                    String jsonData = ClientNetworkService.getInstance().exportBooksJson();
+                    if (jsonData == null) {
+                        publish("[错误] 从服务器获取数据失败");
+                        return -1;
+                    }
+
+                    publish("[进度] 正在写入文件: " + filePath);
+                    try (Writer w = new OutputStreamWriter(
+                            new FileOutputStream(filePath), StandardCharsets.UTF_8)) {
+                        w.write(jsonData);
+                    }
+
+                    publish("[完成] 图书信息导出完成");
+                    return 1;
+                } catch (IOException e) {
+                    publish("[错误] " + e.getMessage());
+                    return -1;
+                }
             }
+
             @Override
             protected void process(java.util.List<String> chunks) {
                 for (String s : chunks) exportArea.append(s + "\n");
             }
+
             @Override
             protected void done() {
+                exportBar.setIndeterminate(false);
                 try {
                     if (get() >= 0) {
-                        exportBar.setValue(exportBar.getMaximum());
+                        exportBar.setValue(100);
                         exportArea.append("------ 导出成功: " + filePath + " ------\n");
                     }
-                } catch (Exception e) { exportArea.append("[错误] " + e.getMessage() + "\n"); }
+                } catch (Exception e) {
+                    exportArea.append("[错误] " + e.getMessage() + "\n");
+                }
                 exportBtn.setEnabled(true);
             }
         }.execute();
     }
 
-    // ========================= 导入面板 =========================
-
     private JPanel createImportPanel() {
         JPanel panel = new JPanel(new BorderLayout(0, 10));
         panel.setBorder(new EmptyBorder(15, 15, 15, 15));
 
-        // 顶部：两行独立布局，避免按钮被底部容器裁切
         JPanel top = new JPanel();
         top.setLayout(new BoxLayout(top, BoxLayout.Y_AXIS));
 
-        // 行1：文件选择
         JPanel row1 = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 3));
         JLabel fileLabel = new JLabel("选择文件:");
         fileLabel.setFont(new Font("微软雅黑", Font.PLAIN, 14));
@@ -158,13 +163,11 @@ public class ImportExportDialog extends JDialog {
         chooseFileBtn = styleBtn("浏览...", new Color(70, 130, 180), 90, 30);
         row1.add(chooseFileBtn);
 
-        // 行2：导入按钮 + 提示
         JPanel row2 = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 3));
-
         importBtn = styleBtn("开始导入", new Color(220, 80, 60), 120, 35);
         row2.add(importBtn);
 
-        JLabel hint = new JLabel("重复图书自动更新");
+        JLabel hint = new JLabel("重复图书自动更新，通过服务器入库");
         hint.setFont(new Font("微软雅黑", Font.ITALIC, 12));
         hint.setForeground(Color.GRAY);
         row2.add(hint);
@@ -174,7 +177,6 @@ public class ImportExportDialog extends JDialog {
         top.add(row2);
         panel.add(top, BorderLayout.NORTH);
 
-        // 状态区
         JPanel center = new JPanel(new BorderLayout(5, 5));
         center.setBorder(new TitledBorder("导入状态"));
 
@@ -213,14 +215,10 @@ public class ImportExportDialog extends JDialog {
             JOptionPane.showMessageDialog(this, "请先选择 JSON 文件", "提示", JOptionPane.WARNING_MESSAGE);
             return;
         }
-        if (!new File(selectedFile).canRead()) {
-            JOptionPane.showMessageDialog(this, "文件无法读取", "错误", JOptionPane.ERROR_MESSAGE);
-            return;
-        }
 
         if (JOptionPane.showConfirmDialog(this,
                 "即将导入: " + new File(selectedFile).getName() +
-                "\n重复图书将自动更新。\n\n确定开始？",
+                "\n重复图书将自动更新。\n数据通过服务器入库。\n\n确定开始？",
                 "确认", JOptionPane.YES_NO_OPTION) != JOptionPane.YES_OPTION) return;
 
         importBtn.setEnabled(false);
@@ -228,55 +226,78 @@ public class ImportExportDialog extends JDialog {
         importBar.setValue(0);
         importArea.setText("");
 
-        new SwingWorker<ImportResult, String>() {
+        new SwingWorker<String, String>() {
             @Override
-            protected ImportResult doInBackground() throws Exception {
-                ProgressCallback cb = new ProgressCallback() {
-                    public void onStart(String msg, int total) {
-                        publish("[开始] " + msg);
-                        SwingUtilities.invokeLater(() -> {
-                            importBar.setMaximum(total > 0 ? total : 1);
-                            importBar.setValue(0);
-                        });
+            protected String doInBackground() {
+                try {
+                    publish("[开始] 正在读取 JSON 文件...");
+                    JsonArray books;
+                    try (Reader r = new InputStreamReader(new FileInputStream(selectedFile), StandardCharsets.UTF_8)) {
+                        JsonObject root = GSON.fromJson(r, JsonObject.class);
+                        if (root == null || !root.has("data")) throw new IOException("无效的 JSON 格式");
+                        JsonElement data = root.get("data");
+                        books = data.isJsonArray() ? data.getAsJsonArray()
+                                : data.getAsJsonObject().getAsJsonArray("books");
+                        if (books == null || books.size() == 0) throw new IOException("文件中没有图书数据");
                     }
-                    public void onProgress(int cur, int total) {
-                        if (cur % 5 == 0 || cur == total) {
-                            publish("[进度] " + cur + " / " + total);
-                            SwingUtilities.invokeLater(() -> importBar.setValue(cur));
+
+                    publish("[进度] 共 " + books.size() + " 条记录，发送到服务器...");
+                    importBar.setMaximum(books.size());
+                    importBar.setValue(0);
+
+                    // 实验九：发送到服务器进行导入
+                    JsonObject result = ClientNetworkService.getInstance().importBooks(books);
+                    if (result != null && result.has("success") && result.get("success").getAsBoolean()) {
+                        JsonObject data = result.getAsJsonObject("data");
+                        int newCount = data.get("newCount").getAsInt();
+                        int updateCount = data.get("updateCount").getAsInt();
+                        int failCount = data.get("failCount").getAsInt();
+                        int total = data.get("total").getAsInt();
+
+                        publish("[完成] 导入完成: 新增 " + newCount + " 条, 更新 " + updateCount
+                                + " 条, 失败 " + failCount + " 条, 共 " + total + " 条");
+
+                        if (data.has("errors") && data.get("errors").getAsJsonArray().size() > 0) {
+                            publish("------ 错误详情 ------");
+                            for (JsonElement e : data.getAsJsonArray("errors")) {
+                                publish("  " + e.getAsString());
+                            }
                         }
+                        return "成功";
+                    } else {
+                        publish("[错误] 服务器导入失败");
+                        return "失败";
                     }
-                    public void onComplete(String msg) { publish("[完成] " + msg); }
-                };
-                return service.importBooks(selectedFile, cb);
+                } catch (Exception e) {
+                    publish("[错误] " + e.getMessage());
+                    return "异常: " + e.getMessage();
+                }
             }
+
             @Override
             protected void process(java.util.List<String> chunks) {
                 for (String s : chunks) importArea.append(s + "\n");
             }
+
             @Override
             protected void done() {
+                importBar.setValue(importBar.getMaximum());
+                importBtn.setEnabled(true);
+                chooseFileBtn.setEnabled(true);
                 try {
-                    ImportResult r = get();
-                    importBar.setValue(importBar.getMaximum());
-                    importArea.append("\n" + r.getSummary() + "\n");
+                    String result = get();
                     JOptionPane.showMessageDialog(ImportExportDialog.this,
-                            "导入完成!\n\n新增: " + (r.getSuccessCount() - r.getUpdateCount()) +
-                            " 条\n更新: " + r.getUpdateCount() + " 条\n失败: " + r.getFailCount() + " 条",
-                            "完成", r.getFailCount() == 0
+                            "导入" + ("成功".equals(result) ? "完成!" : "失败: " + result),
+                            "完成", "成功".equals(result)
                                     ? JOptionPane.INFORMATION_MESSAGE
                                     : JOptionPane.WARNING_MESSAGE);
                 } catch (Exception e) {
-                    importArea.append("[错误] " + e.getMessage() + "\n");
                     JOptionPane.showMessageDialog(ImportExportDialog.this,
                             "导入失败:\n" + e.getMessage(), "错误", JOptionPane.ERROR_MESSAGE);
                 }
-                importBtn.setEnabled(true);
-                chooseFileBtn.setEnabled(true);
             }
         }.execute();
     }
-
-    // ========================= 工具 =========================
 
     private JTextArea createStatusArea() {
         JTextArea area = new JTextArea();

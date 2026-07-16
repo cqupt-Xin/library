@@ -1,23 +1,27 @@
 package ui;
 
+import client.ClientNetworkService;
 import model.Borrow;
 import model.User;
-import service.BorrowService;
 
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
+import java.io.IOException;
 import java.util.List;
 
+/**
+ * 借阅管理对话框 — 实验九 C/S 模式
+ * 通过 ClientNetworkService 与服务器通信
+ */
 public class BorrowDialog extends JDialog {
 
-    private final BorrowService borrowService = new BorrowService();
     private final User currentUser;
     private JTable table;
     private DefaultTableModel tableModel;
 
     public BorrowDialog(Frame owner, User user) {
-        super(owner, "借阅管理", true);
+        super(owner, "借阅管理 (C/S模式)", true);
         this.currentUser = user;
         setSize(950, 500);
         setLocationRelativeTo(owner);
@@ -32,8 +36,8 @@ public class BorrowDialog extends JDialog {
             topPanel.add(activeBtn);
             topPanel.add(returnBtn);
 
-            allBtn.addActionListener(e -> loadBorrows(borrowService.findAll()));
-            activeBtn.addActionListener(e -> loadBorrows(borrowService.findActive()));
+            allBtn.addActionListener(e -> loadAll());
+            activeBtn.addActionListener(e -> loadActive());
             returnBtn.addActionListener(e -> doReturn());
         } else {
             JButton borrowBtn = new JButton("借书");
@@ -45,7 +49,7 @@ public class BorrowDialog extends JDialog {
 
             borrowBtn.addActionListener(e -> doBorrow());
             returnBtn.addActionListener(e -> doReturn());
-            myBtn.addActionListener(e -> loadBorrows(borrowService.findByReaderId(currentUser.getId())));
+            myBtn.addActionListener(e -> loadMyBorrows());
         }
 
         tableModel = new DefaultTableModel(
@@ -60,9 +64,33 @@ public class BorrowDialog extends JDialog {
         add(scrollPane, BorderLayout.CENTER);
 
         if (user == null || "admin".equals(user.getRole())) {
-            loadBorrows(borrowService.findAll());
+            loadAll();
         } else {
-            loadBorrows(borrowService.findByReaderId(currentUser.getId()));
+            loadMyBorrows();
+        }
+    }
+
+    private void loadAll() {
+        try {
+            loadBorrows(ClientNetworkService.getInstance().findAllBorrows());
+        } catch (IOException e) {
+            JOptionPane.showMessageDialog(this, "加载失败: " + e.getMessage());
+        }
+    }
+
+    private void loadActive() {
+        try {
+            loadBorrows(ClientNetworkService.getInstance().findActiveBorrows());
+        } catch (IOException e) {
+            JOptionPane.showMessageDialog(this, "加载失败: " + e.getMessage());
+        }
+    }
+
+    private void loadMyBorrows() {
+        try {
+            loadBorrows(ClientNetworkService.getInstance().findBorrowsByReaderId(currentUser.getId()));
+        } catch (IOException e) {
+            JOptionPane.showMessageDialog(this, "加载失败: " + e.getMessage());
         }
     }
 
@@ -79,7 +107,6 @@ public class BorrowDialog extends JDialog {
     }
 
     private void doBorrow() {
-        // 管理员代读者借书（需要输入读者ID和图书ID）
         JTextField bookIdField = new JTextField(10);
         JTextField readerIdField = new JTextField(10);
 
@@ -96,39 +123,47 @@ public class BorrowDialog extends JDialog {
             long bookId = Long.parseLong(bookIdField.getText().trim());
             int readerId = Integer.parseInt(readerIdField.getText().trim());
 
-            if (borrowService.borrowBook(bookId, readerId)) {
+            if (ClientNetworkService.getInstance().borrowBook(bookId, readerId)) {
                 JOptionPane.showMessageDialog(this, "借阅成功");
-                loadBorrows(borrowService.findAll());
+                loadAll();
             } else {
                 JOptionPane.showMessageDialog(this, "借阅失败");
             }
         } catch (NumberFormatException e) {
             JOptionPane.showMessageDialog(this, "请输入有效的数字");
+        } catch (IOException e) {
+            JOptionPane.showMessageDialog(this, "借阅失败: " + e.getMessage());
         }
     }
 
     private void doReturn() {
         int row = table.getSelectedRow();
         if (row < 0) {
-            JOptionPane.showMessageDialog(this, "请先选择一条借阅记录"); return;
+            JOptionPane.showMessageDialog(this, "请先选择一条借阅记录");
+            return;
         }
         String status = (String) tableModel.getValueAt(row, 7);
         if (!"借出中".equals(status)) {
-            JOptionPane.showMessageDialog(this, "该记录已归还"); return;
+            JOptionPane.showMessageDialog(this, "该记录已归还");
+            return;
         }
 
         long sernum = (Long) tableModel.getValueAt(row, 0);
         long bookId = (Long) tableModel.getValueAt(row, 1);
 
-        if (borrowService.returnBook(sernum, bookId)) {
-            JOptionPane.showMessageDialog(this, "归还成功");
-            if (currentUser == null || "admin".equals(currentUser.getRole())) {
-                loadBorrows(borrowService.findAll());
+        try {
+            if (ClientNetworkService.getInstance().returnBook(sernum, bookId)) {
+                JOptionPane.showMessageDialog(this, "归还成功");
+                if (currentUser == null || "admin".equals(currentUser.getRole())) {
+                    loadAll();
+                } else {
+                    loadMyBorrows();
+                }
             } else {
-                loadBorrows(borrowService.findByReaderId(currentUser.getId()));
+                JOptionPane.showMessageDialog(this, "归还失败");
             }
-        } else {
-            JOptionPane.showMessageDialog(this, "归还失败");
+        } catch (IOException e) {
+            JOptionPane.showMessageDialog(this, "归还失败: " + e.getMessage());
         }
     }
 }

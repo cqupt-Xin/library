@@ -5,6 +5,10 @@ import model.User;
 import javax.swing.*;
 import java.awt.*;
 
+/**
+ * 读者主界面 — 实验九 C/S 模式
+ * 所有操作通过 ClientNetworkService 与后台服务器通信
+ */
 public class ReaderMainFrame extends JFrame {
 
     private final User reader;
@@ -13,7 +17,7 @@ public class ReaderMainFrame extends JFrame {
     public ReaderMainFrame(User reader) {
         this.reader = reader;
 
-        setTitle("图书管理系统 - 读者:" + reader.getUsername());
+        setTitle("图书管理系统 - 读者:" + reader.getUsername() + " (C/S模式 V8.0)");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setSize(500, 400);
         setLocationRelativeTo(null);
@@ -29,7 +33,6 @@ public class ReaderMainFrame extends JFrame {
 
         gbc.gridwidth = 1;
 
-        // Row 1: 借阅图书 | 我的借阅
         gbc.gridy = 1; gbc.gridx = 0;
         JButton borrowBtn = new JButton("借阅图书");
         styleButton(borrowBtn);
@@ -40,11 +43,9 @@ public class ReaderMainFrame extends JFrame {
         styleButton(myBorrowBtn);
         panel.add(myBorrowBtn, gbc);
 
-        // Row 2: 启动服务器 | 退出登录
         gbc.gridy = 2; gbc.gridx = 0;
-        JButton serverBtn = new JButton("启动服务器");
+        JButton serverBtn = new JButton("服务器监视");
         styleButton(serverBtn);
-        serverBtn.setToolTipText("启动本地 TCP 服务器，等待 NetAssist 客户端连接");
         panel.add(serverBtn, gbc);
 
         gbc.gridx = 1;
@@ -52,7 +53,6 @@ public class ReaderMainFrame extends JFrame {
         styleButton(logoutBtn);
         panel.add(logoutBtn, gbc);
 
-        // — 事件绑定 —
         borrowBtn.addActionListener(e -> new BookBrowseDialog(this, reader).setVisible(true));
         myBorrowBtn.addActionListener(e -> new MyBorrowDialog(this, reader).setVisible(true));
         serverBtn.addActionListener(e -> openServerMonitor());
@@ -66,6 +66,16 @@ public class ReaderMainFrame extends JFrame {
         });
 
         setContentPane(panel);
+
+        addWindowListener(new java.awt.event.WindowAdapter() {
+            @Override
+            public void windowClosing(java.awt.event.WindowEvent e) {
+                if (monitorDialog != null) {
+                    monitorDialog.shutdownServer();
+                    monitorDialog.dispose();
+                }
+            }
+        });
     }
 
     private void openServerMonitor() {

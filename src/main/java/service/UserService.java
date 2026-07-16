@@ -12,10 +12,10 @@ public class UserService {
     public User login(String idStr, String password) {
         try {
             int id = Integer.parseInt(idStr.trim());
-            // 先尝试管理员登录
+            
             User admin = userDao.loginAdmin(id, password);
             if (admin != null) return admin;
-            // 再尝试读者登录
+            
             return userDao.loginReader(id, password);
         } catch (NumberFormatException e) {
             return null;

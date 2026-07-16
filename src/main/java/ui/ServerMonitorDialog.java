@@ -1,6 +1,6 @@
 package ui;
 
-import server.BookCommandServer;
+import client.ClientNetworkService;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
@@ -10,29 +10,28 @@ import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 
 /**
- * 服务器监视弹窗
- * 包含：端口配置、启停控制、状态显示、实时日志
+ * 服务器监视对话框（客户端版本）
+ * 客户端模式下仅显示连接状态和日志，不控制服务器启停
+ * 如需完整的服务器控制功能，请在服务端进程中运行
  */
 public class ServerMonitorDialog extends JDialog {
 
     private final JFrame owner;
-    private BookCommandServer server;
 
-    private JButton toggleBtn;
     private JLabel statusLabel;
-    private JSpinner portSpinner;
     private JTextArea logArea;
+    private Timer pingTimer;
 
     public ServerMonitorDialog(JFrame owner) {
-        super(owner, "服务器监视", false); // 非模态
+        super(owner, "服务器连接状态", false);
         this.owner = owner;
         initUI();
 
-        // 关闭窗口时仅隐藏，不销毁
         setDefaultCloseOperation(JDialog.HIDE_ON_CLOSE);
         addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent e) {
+                stopPingTimer();
                 setVisible(false);
             }
         });
@@ -52,37 +51,24 @@ public class ServerMonitorDialog extends JDialog {
         setContentPane(mainPanel);
     }
 
-    // ==================== 顶部控制区 ====================
-
     private JPanel createTopPanel() {
         JPanel panel = new JPanel(new BorderLayout());
 
-        // — 控制行 —
         JPanel controlRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 12, 5));
 
-        JLabel portLabel = new JLabel("监听端口:");
-        portLabel.setFont(new Font("微软雅黑", Font.PLAIN, 13));
-        controlRow.add(portLabel);
+        JLabel titleLabel = new JLabel("服务器状态监视");
+        titleLabel.setFont(new Font("微软雅黑", Font.BOLD, 13));
+        controlRow.add(titleLabel);
 
-        SpinnerNumberModel portModel = new SpinnerNumberModel(8888, 1024, 65535, 1);
-        portSpinner = new JSpinner(portModel);
-        portSpinner.setFont(new Font("微软雅黑", Font.PLAIN, 13));
-        portSpinner.setPreferredSize(new Dimension(75, 28));
-        controlRow.add(portSpinner);
-
-        toggleBtn = new JButton("启动服务器");
-        toggleBtn.setFont(new Font("微软雅黑", Font.PLAIN, 13));
-        toggleBtn.setBackground(new Color(46, 139, 87));
-        toggleBtn.setForeground(Color.BLACK);
-        toggleBtn.setFocusPainted(false);
-        toggleBtn.setCursor(new Cursor(Cursor.HAND_CURSOR));
-        toggleBtn.setMargin(new Insets(4, 16, 4, 16));
-        controlRow.add(toggleBtn);
-
-        statusLabel = new JLabel("● 已停止");
+        statusLabel = new JLabel("检测中...");
         statusLabel.setFont(new Font("微软雅黑", Font.PLAIN, 13));
         statusLabel.setForeground(Color.GRAY);
         controlRow.add(statusLabel);
+
+        JButton refreshBtn = new JButton("刷新状态");
+        refreshBtn.setFont(new Font("微软雅黑", Font.PLAIN, 12));
+        refreshBtn.setMargin(new Insets(2, 8, 2, 8));
+        controlRow.add(refreshBtn);
 
         JButton clearBtn = new JButton("清空日志");
         clearBtn.setFont(new Font("微软雅黑", Font.PLAIN, 12));
@@ -91,24 +77,28 @@ public class ServerMonitorDialog extends JDialog {
 
         panel.add(controlRow, BorderLayout.CENTER);
 
-        // — 分隔线 —
+        // 提示信息
+        JPanel infoRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 12, 2));
+        JLabel infoLabel = new JLabel("客户端模式 | 服务器需独立运行 (java server.ServerMain)");
+        infoLabel.setFont(new Font("微软雅黑", Font.PLAIN, 11));
+        infoLabel.setForeground(new Color(100, 100, 100));
+        infoRow.add(infoLabel);
+        panel.add(infoRow, BorderLayout.SOUTH);
+
         JSeparator sep = new JSeparator();
         sep.setForeground(new Color(200, 200, 200));
         sep.setPreferredSize(new Dimension(490, 1));
-        panel.add(sep, BorderLayout.SOUTH);
+        panel.add(sep, BorderLayout.NORTH);
 
-        // 事件
-        toggleBtn.addActionListener(e -> toggleServer());
+        refreshBtn.addActionListener(e -> checkConnection());
         clearBtn.addActionListener(e -> logArea.setText(""));
 
         return panel;
     }
 
-    // ==================== 日志区 ====================
-
     private JPanel createLogPanel() {
         JPanel panel = new JPanel(new BorderLayout());
-        panel.setBorder(new TitledBorder("运行日志"));
+        panel.setBorder(new TitledBorder("连接日志"));
 
         logArea = new JTextArea();
         logArea.setEditable(false);
@@ -123,56 +113,60 @@ public class ServerMonitorDialog extends JDialog {
         return panel;
     }
 
-    // ==================== 服务器操作 ====================
-
-    private void toggleServer() {
-        if (server != null && server.isRunning()) {
-            server.stop();
-            server = null;
-            updateUIState(false, 0);
+    @Override
+    public void setVisible(boolean visible) {
+        if (visible) {
+            checkConnection();
+            startPingTimer();
         } else {
-            int port = (int) portSpinner.getValue();
-            toggleBtn.setEnabled(false);
-            toggleBtn.setText("启动中...");
-            statusLabel.setText("◉ 绑定端口...");
-            statusLabel.setForeground(Color.ORANGE);
-            portSpinner.setEnabled(false);
-
-            server = new BookCommandServer(port);
-            server.start(logArea, success -> {
-                toggleBtn.setEnabled(true);
-                if (success) {
-                    updateUIState(true, port);
-                } else {
-                    server = null;
-                    updateUIState(false, 0);
-                }
-            });
+            stopPingTimer();
         }
+        super.setVisible(visible);
     }
 
-    private void updateUIState(boolean running, int port) {
-        if (running) {
-            toggleBtn.setText("停止服务器");
-            toggleBtn.setBackground(new Color(220, 80, 60));
-            statusLabel.setText("● 运行中 (端口 " + port + ")");
-            statusLabel.setForeground(new Color(46, 139, 87));
-            portSpinner.setEnabled(false);
-        } else {
-            toggleBtn.setText("启动服务器");
-            toggleBtn.setBackground(new Color(46, 139, 87));
-            statusLabel.setText("● 已停止");
-            statusLabel.setForeground(Color.GRAY);
-            portSpinner.setEnabled(true);
+    private void checkConnection() {
+        ClientNetworkService cns = ClientNetworkService.getInstance();
+        String addr = cns.getHost() + ":" + cns.getPort();
+
+        new Thread(() -> {
+            long start = System.currentTimeMillis();
+            boolean ok = cns.ping();
+            long elapsed = System.currentTimeMillis() - start;
+
+            SwingUtilities.invokeLater(() -> {
+                String time = java.time.LocalTime.now()
+                        .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss"));
+                if (ok) {
+                    statusLabel.setText("\u25CF 已连接 (" + elapsed + "ms)");
+                    statusLabel.setForeground(new Color(46, 139, 87));
+                    logArea.append("[" + time + "] \u2713 服务器 " + addr + " 响应正常 ("
+                            + elapsed + "ms)\n");
+                } else {
+                    statusLabel.setText("\u2717 未连接");
+                    statusLabel.setForeground(new Color(220, 80, 60));
+                    logArea.append("[" + time + "] \u2717 无法连接服务器 " + addr + "\n");
+                }
+            });
+        }, "ServerPing").start();
+    }
+
+    private void startPingTimer() {
+        stopPingTimer();
+        pingTimer = new Timer(10000, e -> checkConnection()); // 每10秒检测一次
+        pingTimer.start();
+    }
+
+    private void stopPingTimer() {
+        if (pingTimer != null) {
+            pingTimer.stop();
+            pingTimer = null;
         }
     }
 
     /**
-     * 可由外部调用以在关闭主窗口时停止服务器
+     * 客户端模式下无需关闭服务器
      */
     public void shutdownServer() {
-        if (server != null && server.isRunning()) {
-            server.stop();
-        }
+        stopPingTimer();
     }
 }

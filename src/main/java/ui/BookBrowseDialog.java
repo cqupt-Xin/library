@@ -1,25 +1,27 @@
 package ui;
 
+import client.ClientNetworkService;
 import model.Book;
 import model.User;
-import service.BookService;
-import service.BorrowService;
 
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
+import java.io.IOException;
 import java.util.List;
 
+/**
+ * 读者借阅浏览对话框 — 实验九 C/S 模式
+ * 通过 ClientNetworkService 与服务器通信
+ */
 public class BookBrowseDialog extends JDialog {
 
-    private final BookService bookService = new BookService();
-    private final BorrowService borrowService = new BorrowService();
     private final User reader;
     private JTable table;
     private DefaultTableModel tableModel;
 
     public BookBrowseDialog(Frame owner, User reader) {
-        super(owner, "借阅图书", true);
+        super(owner, "借阅图书 (C/S模式)", true);
         this.reader = reader;
         setSize(1000, 550);
         setLocationRelativeTo(owner);
@@ -54,12 +56,28 @@ public class BookBrowseDialog extends JDialog {
 
         searchBtn.addActionListener(e -> {
             String kw = searchField.getText().trim();
-            loadBooks(kw.isEmpty() ? bookService.findAll() : bookService.search(kw));
+            try {
+                if (kw.isEmpty()) {
+                    loadBooks(ClientNetworkService.getInstance().findAllBooks());
+                } else {
+                    loadBooks(ClientNetworkService.getInstance().searchBooks(kw));
+                }
+            } catch (IOException ex) {
+                JOptionPane.showMessageDialog(this, "搜索失败: " + ex.getMessage());
+            }
         });
-        refreshBtn.addActionListener(e -> loadBooks(bookService.findAll()));
+        refreshBtn.addActionListener(e -> refreshBooks());
         borrowBtn.addActionListener(e -> doBorrow());
 
-        loadBooks(bookService.findAll());
+        refreshBooks();
+    }
+
+    private void refreshBooks() {
+        try {
+            loadBooks(ClientNetworkService.getInstance().findAllBooks());
+        } catch (IOException e) {
+            JOptionPane.showMessageDialog(this, "加载失败: " + e.getMessage());
+        }
     }
 
     private void loadBooks(List<Book> books) {
@@ -92,11 +110,15 @@ public class BookBrowseDialog extends JDialog {
 
         long bookId = (Long) tableModel.getValueAt(row, 0);
 
-        if (borrowService.borrowBook(bookId, reader.getId())) {
-            JOptionPane.showMessageDialog(this, "借阅成功!");
-            loadBooks(bookService.findAll());
-        } else {
-            JOptionPane.showMessageDialog(this, "借阅失败");
+        try {
+            if (ClientNetworkService.getInstance().borrowBook(bookId, reader.getId())) {
+                JOptionPane.showMessageDialog(this, "借阅成功!");
+                refreshBooks();
+            } else {
+                JOptionPane.showMessageDialog(this, "借阅失败");
+            }
+        } catch (IOException e) {
+            JOptionPane.showMessageDialog(this, "借阅失败: " + e.getMessage());
         }
     }
 }
