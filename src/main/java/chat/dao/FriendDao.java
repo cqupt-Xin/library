@@ -38,15 +38,17 @@ public class FriendDao {
     }
 
     /**
-     * 获取用户好友列表（联表 reader_info 获取真实姓名）
+     * 获取用户好友列表
      * 管理员：自动将所有活跃读者添加为好友
+     * 读者：自动展示所有管理员为好友（不走 friend_relations，管理员不在 reader_info 中）
      */
     public List<FriendInfo> getFriends(int userId) {
         List<FriendInfo> list = new ArrayList<>();
-        // 如果是管理员（admin表有记录），自动同步全部活跃读者为好友
         if (isAdmin(userId)) {
+            // 管理员 — 自动同步全部活跃读者
             syncAllReadersToAdmin(userId);
         }
+        // 查询常规好友（来自 reader_info 的读者）
         String sql = "SELECT fr.friend_id, ri.name, fr.group_id, fr.add_time " +
                      "FROM friend_relations fr " +
                      "JOIN reader_info ri ON fr.friend_id = ri.reader_id " +
@@ -64,6 +66,18 @@ public class FriendDao {
                 ));
             }
         } catch (SQLException e) { e.printStackTrace(); }
+        // 读者：自动追加所有管理员到好友列表（不依赖 friend_relations，管理员不在 reader_info 中）
+        if (!isAdmin(userId)) {
+            String adminSql = "SELECT admin_id FROM admin ORDER BY admin_id";
+            try (Connection conn = DBUtil.getConnection();
+                 PreparedStatement ps = conn.prepareStatement(adminSql);
+                 ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    int adminId = rs.getInt("admin_id");
+                    list.add(new FriendInfo(adminId, "管理员(" + adminId + ")", 0, null));
+                }
+            } catch (SQLException e) { e.printStackTrace(); }
+        }
         return list;
     }
 
@@ -79,11 +93,10 @@ public class FriendDao {
     }
 
     /**
-     * 将全部活跃读者同步为管理员好友（单向：管理员->读者，不会再反向）
+     * 将全部活跃读者同步为管理员好友
      */
     private void syncAllReadersToAdmin(int adminId) {
         int groupId = ensureDefaultGroup(adminId);
-        // 查询所有 card_state=1 的活跃读者，尚未在管理员好友列表中的
         String sql = "SELECT rc.reader_id FROM reader_card rc " +
                      "WHERE rc.card_state=1 AND rc.reader_id NOT IN " +
                      "(SELECT friend_id FROM friend_relations WHERE user_id=?)";
@@ -103,14 +116,23 @@ public class FriendDao {
      * 验证目标读者存在且card_state=1
      */
     public String addFriend(int userId, int targetId) {
-        // 验证目标存在且状态正常
-        String checkSql = "SELECT name FROM reader_card WHERE reader_id=? AND card_state=1";
+        // 验证目标存在：活跃读者 或 管理员
+        boolean targetExists = false;
+        String checkSql = "SELECT 1 FROM reader_info ri JOIN reader_card rc ON ri.reader_id=rc.reader_id WHERE ri.reader_id=? AND rc.card_state=1";
         try (Connection conn = DBUtil.getConnection();
              PreparedStatement ps = conn.prepareStatement(checkSql)) {
             ps.setInt(1, targetId);
-            ResultSet rs = ps.executeQuery();
-            if (!rs.next()) return "目标读者不存在或已被禁用";
+            if (ps.executeQuery().next()) targetExists = true;
         } catch (SQLException e) { return "验证失败: " + e.getMessage(); }
+        if (!targetExists) {
+            // 管理员也可能成为好友目标
+            try (Connection conn = DBUtil.getConnection();
+                 PreparedStatement ps = conn.prepareStatement("SELECT 1 FROM admin WHERE admin_id=?")) {
+                ps.setInt(1, targetId);
+                if (ps.executeQuery().next()) targetExists = true;
+            } catch (SQLException e) { return "验证失败: " + e.getMessage(); }
+        }
+        if (!targetExists) return "目标不存在或已被禁用";
 
         // 不能添加自己
         if (userId == targetId) return "不能添加自己为好友";

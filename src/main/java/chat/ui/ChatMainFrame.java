@@ -276,22 +276,33 @@ public class ChatMainFrame extends JFrame {
                     // 处理 getOnlineUsers 响应: data是数组 [1,2,3...]
                     if (json.has("data") && json.get("data").isJsonArray()) {
                         JsonArray arr = json.getAsJsonArray("data");
-                        // 区分：数字数组 = 在线用户ID列表，对象数组 = 历史/离线消息列表
                         if (arr.size() > 0 && arr.get(0).isJsonPrimitive()) {
                             onlineUsers.clear();
                             for (int i = 0; i < arr.size(); i++) onlineUsers.add(arr.get(i).getAsInt());
                             refreshContactList();
                         } else if (arr.size() > 0 && arr.get(0).isJsonObject()) {
-                            // getHistory 响应：data 是 ChatMessage 数组
                             java.lang.reflect.Type histType = new TypeToken<List<ChatMessage>>() {}.getType();
                             List<ChatMessage> history = gson.fromJson(arr, histType);
                             for (ChatMessage m : history) appendMessage(m);
                         }
                         break;
                     }
-                    if (json.get("success") != null && json.get("success").getAsBoolean()) {
-                        JsonObject data = json.has("data") ? json.getAsJsonObject("data") : null;
+                    // 处理 success/error 响应
+                    if (json.get("success") != null) {
+                        String respMsg = json.has("message") ? json.get("message").getAsString() : "";
+                        boolean ok = json.get("success").getAsBoolean();
+                        if (ok) {
+                            statusLabel.setText(respMsg);
+                            statusLabel.setForeground(new Color(0, 128, 0));
+                        } else {
+                            statusLabel.setText(respMsg);
+                            statusLabel.setForeground(Color.RED);
+                        }
+                        // 解析 data 对象
+                        JsonObject data = json.has("data") && json.get("data").isJsonObject()
+                                ? json.getAsJsonObject("data") : null;
                         if (data != null && data.has("friends")) {
+                            // getFriends 响应 — 直接填充列表，不再触发 requestFriends
                             friendMap.clear();
                             java.lang.reflect.Type friendListType = new TypeToken<List<FriendInfo>>(){}.getType();
                             List<FriendInfo> flist = gson.fromJson(data.get("friends"), friendListType);
@@ -299,6 +310,11 @@ public class ChatMainFrame extends JFrame {
                                 friendMap.put(fi.getFriendId(), fi.getFriendName());
                             }
                             refreshContactList();
+                        } else if (data == null && ok) {
+                            // 操作类响应（addFriend/removeFriend 等）— 刷新好友列表
+                            if (respMsg.contains("好友") || respMsg.contains("添加") || respMsg.contains("删除")) {
+                                requestFriends();
+                            }
                         }
                     }
                     break;
